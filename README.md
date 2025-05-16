@@ -1,6 +1,11 @@
-# DashCTL - Grafana Dashboard Import/Export Tool
+# dashctl - Grafana Dashboard Import/Export Tool
 
 A command-line tool for importing and exporting Grafana dashboards and folders while maintaining the directory structure.
+
+## Author
+
+- [LinkedIn](https://www.linkedin.com/in/taron-hovsepyan-00013/)
+- [Buy Me a Coffee](https://buymeacoffee.com/taron)
 
 ## Features
 
