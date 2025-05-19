@@ -63,8 +63,8 @@ make_request() {
             echo "$body"
             return 0
         elif [ "$http_code" -eq 404 ]; then
-            log_error "Resource not found: $body"
-            return 1
+            echo "$body"
+            return 2
         elif [ "$http_code" -eq 403 ]; then
             log_error "Permission denied: $body"
             return 1
@@ -85,6 +85,8 @@ export_folder() {
     local folder_uid=$1
     local export_dir=$2
     local dry_run=$3
+    local total_exported=0
+    local failed_exports=0
 
     # Check if folder_uid is a path
     if [[ "$folder_uid" == *"/"* ]]; then
@@ -106,8 +108,7 @@ export_folder() {
     fi
 
     # Get folder details
-    folder_data=$(make_request "/api/folders/$folder_uid")
-    if [ $? -ne 0 ]; then
+    if ! folder_data=$(make_request "/api/folders/$folder_uid"); then
         return 1
     fi
 
@@ -133,16 +134,12 @@ export_folder() {
     fi
 
     # Export dashboards in this folder using the search API with folderUids parameter
-    dashboards=$(make_request "/api/search?query=&type=dash-db&folderUids=$folder_uid")
-    if [ $? -ne 0 ]; then
+    if ! dashboards=$(make_request "/api/search?query=&type=dash-db&folderUids=$folder_uid"); then
         return 1
     fi
 
-    local total_exported=0
-    local failed_exports=0
-
     # Process each dashboard and verify it belongs to the correct folder
-    echo "$dashboards" | jq -c '.[]' | while read -r dashboard; do
+    while IFS= read -r dashboard; do
         dash_uid=$(echo "$dashboard" | jq -r '.uid')
         dash_folder_uid=$(echo "$dashboard" | jq -r '.folderUid')
 
@@ -156,7 +153,7 @@ export_folder() {
                 fi
             fi
         fi
-    done
+    done < <(echo "$dashboards" | jq -c '.[]')
 
     if [ "$dry_run" = false ]; then
         echo -e "\nFolder Export Summary for '$folder_title':"
@@ -173,8 +170,7 @@ export_dashboard() {
     local dry_run=$3
 
     # Get dashboard details
-    dashboard_data=$(make_request "/api/dashboards/uid/$dashboard_uid")
-    if [ $? -ne 0 ]; then
+    if ! dashboard_data=$(make_request "/api/dashboards/uid/$dashboard_uid"); then
         return 1
     fi
 
@@ -209,8 +205,7 @@ export_dashboard() {
     if [ ! -f "$folder_file" ]; then
         if [ "$folder_uid" != "general" ]; then
             # Get folder details
-            folder_data=$(make_request "/api/folders/$folder_uid")
-            if [ $? -eq 0 ]; then
+            if folder_data=$(make_request "/api/folders/$folder_uid"); then
                 mkdir -p "$folder_export_dir"
                 if [ "$dry_run" = true ]; then
                     log_warning "Would export folder '$folder_title' with uid '$folder_uid'"
@@ -276,9 +271,8 @@ export_all_dashboards() {
 
     # First, export all folders
     log_success "Exporting all folders..."
-    folders=$(make_request "/api/folders")
-    if [ $? -eq 0 ]; then
-        echo "$folders" | jq -c '.[]' | while read -r folder; do
+    if folders=$(make_request "/api/folders"); then
+        while IFS= read -r folder; do
             folder_uid=$(echo "$folder" | jq -r '.uid')
             folder_title=$(echo "$folder" | jq -r '.title')
             folder_name=$(echo "$folder_title" | tr '[:upper:]' '[:lower:]' | tr ' ' '_' | tr -cd '[:alnum:]_')
@@ -294,7 +288,7 @@ export_all_dashboards() {
                 }' > "$export_dir/folders/$folder_name.json"
                 log_success "Exported folder '$folder_title' to $export_dir/folders/$folder_name.json"
             fi
-        done
+        done < <(echo "$folders" | jq -c '.[]')
     else
         log_error "Failed to export folders"
     fi
@@ -303,8 +297,7 @@ export_all_dashboards() {
     log_success "Exporting all dashboards..."
     while true; do
         # Get dashboards with pagination
-        dashboards=$(make_request "/api/search?query=&type=dash-db&limit=$limit&page=$page")
-        if [ $? -ne 0 ]; then
+        if ! dashboards=$(make_request "/api/search?query=&type=dash-db&limit=$limit&page=$page"); then
             break
         fi
 
@@ -314,7 +307,7 @@ export_all_dashboards() {
         fi
 
         # Process each dashboard
-        echo "$dashboards" | jq -c '.[]' | while read -r dashboard; do
+        while IFS= read -r dashboard; do
             dash_uid=$(echo "$dashboard" | jq -r '.uid')
             if [ -n "$dash_uid" ]; then
                 if export_dashboard "$dash_uid" "$export_dir" "$dry_run"; then
@@ -323,7 +316,7 @@ export_all_dashboards() {
                     ((failed_exports++))
                 fi
             fi
-        done
+        done < <(echo "$dashboards" | jq -c '.[]')
 
         # Check if we got fewer results than the limit (last page)
         if [ "$(echo "$dashboards" | jq 'length')" -lt "$limit" ]; then
@@ -373,8 +366,7 @@ import_folder() {
     fi
 
     # Check if folder already exists
-    existing_folder=$(make_request "/api/folders/$folder_uid")
-    if [ $? -eq 0 ]; then
+    if make_request "/api/folders/$folder_uid" >/dev/null; then
         log_warning "Folder '$folder_title' already exists, skipping"
         return 0
     fi
@@ -382,8 +374,7 @@ import_folder() {
     # Check if parent folder exists
     parent_uid=$(echo "$folder_data" | jq -r '.parentUid')
     if [ "$parent_uid" != "null" ] && [ -n "$parent_uid" ]; then
-        parent_folder=$(make_request "/api/folders/$parent_uid")
-        if [ $? -ne 0 ]; then
+        if ! make_request "/api/folders/$parent_uid" >/dev/null; then
             log_warning "Parent folder with UID '$parent_uid' not found, will create folder at root level"
             # Remove parentUid from folder data
             folder_data=$(echo "$folder_data" | jq 'del(.parentUid)')
@@ -403,8 +394,7 @@ import_folder() {
     fi
 
     # Only proceed with actual import if not in dry run mode
-    response=$(make_request "/api/folders" "POST" "$folder_data")
-    if [ $? -eq 0 ]; then
+    if response=$(make_request "/api/folders" "POST" "$folder_data"); then
         log_success "Imported folder '$folder_title'"
         
         # Import associated dashboards if requested
@@ -433,8 +423,7 @@ rollback_dashboard() {
     local dry_run=$2
 
     # Get dashboard versions
-    versions=$(make_request "/api/dashboards/uid/$dashboard_uid/versions")
-    if [ $? -ne 0 ]; then
+    if ! versions=$(make_request "/api/dashboards/uid/$dashboard_uid/versions"); then
         log_error "Failed to get versions for dashboard '$dashboard_uid'"
         return 1
     fi
@@ -447,15 +436,17 @@ rollback_dashboard() {
     fi
 
     # Get the dashboard title for logging
-    dashboard_data=$(make_request "/api/dashboards/uid/$dashboard_uid")
+    if ! dashboard_data=$(make_request "/api/dashboards/uid/$dashboard_uid"); then
+        log_error "Failed to get dashboard data for '$dashboard_uid'"
+        return 1
+    fi
     dashboard_title=$(echo "$dashboard_data" | jq -r '.dashboard.title')
 
     if [ "$dry_run" = true ]; then
         log_warning "Would rollback dashboard '$dashboard_title' to version $previous_version"
     else
         # Restore the previous version
-        response=$(make_request "/api/dashboards/uid/$dashboard_uid/restore" "POST" "{\"version\": $previous_version}")
-        if [ $? -eq 0 ]; then
+        if response=$(make_request "/api/dashboards/uid/$dashboard_uid/restore" "POST" "{\"version\": $previous_version}"); then
             log_success "Rolled back dashboard '$dashboard_title' to version $previous_version"
             return 0
         else
@@ -497,20 +488,25 @@ import_dashboard() {
     # Check if dashboard already exists and if it's provisioned
     if [ -n "$dashboard_uid" ] && [ "$dashboard_uid" != "null" ]; then
         existing_dashboard=$(make_request "/api/dashboards/uid/$dashboard_uid")
-        if [ $? -eq 0 ]; then
+        local status=$?
+        if [ $status -eq 0 ]; then
             is_provisioned=$(echo "$existing_dashboard" | jq -r '.meta.provisioned')
             if [ "$is_provisioned" = "true" ]; then
                 log_warning "Skipping import of provisioned dashboard '$dashboard_title'"
                 return 0
             fi
             log_warning "Dashboard '$dashboard_title' already exists, will be updated"
+        elif [ $status -eq 2 ]; then
+            log_warning "Dashboard '$dashboard_title' does not exist, will be created"
+        else
+            log_error "Failed to check dashboard status"
+            return 1
         fi
     fi
 
     # Ensure folder exists before importing dashboard
     if [ "$folder_uid" != "general" ]; then
-        existing_folder=$(make_request "/api/folders/$folder_uid")
-        if [ $? -ne 0 ]; then
+        if ! make_request "/api/folders/$folder_uid" >/dev/null; then
             log_warning "Folder with UID '$folder_uid' not found, will be created"
             # Create folder if it doesn't exist
             folder_data=$(echo "$dashboard_data" | jq '{
@@ -518,8 +514,7 @@ import_dashboard() {
                 title: (.dashboard.folderTitle // "New Folder"),
                 overwrite: true
             }')
-            response=$(make_request "/api/folders" "POST" "$folder_data")
-            if [ $? -ne 0 ]; then
+            if ! make_request "/api/folders" "POST" "$folder_data" >/dev/null; then
                 log_error "Failed to create folder for dashboard '$dashboard_title'"
                 return 1
             fi
@@ -529,8 +524,7 @@ import_dashboard() {
     if [ "$dry_run" = true ]; then
         log_warning "Would import dashboard '$dashboard_title'"
     else
-        response=$(make_request "/api/dashboards/db" "POST" "$dashboard_data")
-        if [ $? -eq 0 ]; then
+        if response=$(make_request "/api/dashboards/db" "POST" "$dashboard_data"); then
             log_success "Imported dashboard '$dashboard_title'"
             return 0
         else
@@ -565,13 +559,13 @@ import_all() {
     # Then import all dashboards
     log_success "Importing dashboards..."
     if [ -d "$export_dir/dashboards" ]; then
-        find "$export_dir/dashboards" -type f -name "*.json" | while read -r dashboard_file; do
+        while IFS= read -r dashboard_file; do
             if import_dashboard "$dashboard_file" "$dry_run"; then
                 ((total_imported++))
             else
                 ((failed_imports++))
             fi
-        done
+        done < <(find "$export_dir/dashboards" -type f -name "*.json")
     else
         log_warning "No dashboards directory found at $export_dir/dashboards"
     fi
@@ -657,8 +651,8 @@ main() {
                         if [ -n "$folder_file" ]; then
                             import_folder "$folder_file" "$dry_run" true
                         else
-                            log_error "Folder with UID '$folder_item' not found in export directory"
-                            log_error "To import a new folder, provide the path to the folder JSON file"
+                            log_warning "Folder with UID '$folder_item' not found in export directory"
+                            log_warning "To import a new folder, provide the path to the folder JSON file"
                             return 1
                         fi
                     fi
@@ -674,8 +668,8 @@ main() {
                     if [ -n "$dashboard_file" ]; then
                         import_dashboard "$dashboard_file" "$dry_run"
                     else
-                        log_error "Dashboard with UID '$dashboard_id' not found in export directory"
-                        log_error "To import a new dashboard, provide the path to the dashboard JSON file"
+                        log_warning "Dashboard with UID '$dashboard_id' not found in export directory"
+                        log_warning "To import a new dashboard, provide the path to the dashboard JSON file"
                         return 1
                     fi
                 fi
