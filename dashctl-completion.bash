@@ -10,11 +10,11 @@ _dashctl_completion() {
     opts="export import rollback"
 
     # Options
-    local options="--folders --dashboard-id --work-dir --dry-run --rollback"
+    local options="--folders --dashboard-id --work-dir --dry-run"
 
     # If we're completing the first argument
     if [[ ${COMP_CWORD} -eq 1 ]]; then
-        COMPREPLY=( $(compgen -W "${opts}" -- ${cur}) )
+        mapfile -t COMPREPLY < <(compgen -W "${opts}" -- "${cur}")
         return 0
     fi
 
@@ -24,15 +24,21 @@ _dashctl_completion() {
             # Complete with both UIDs and file paths
             if [[ -d "grafana/folders" ]]; then
                 # Get folder UIDs from JSON files
-                local folder_uids=$(grep -r "\"uid\":" grafana/folders/*.json 2>/dev/null | sed -n 's/.*"uid":"\([^"]*\)".*/\1/p')
+                local folder_uids
+                folder_uids=$(grep -r "\"uid\":" grafana/folders/*.json 2>/dev/null | sed -n 's/.*"uid":"\([^"]*\)".*/\1/p')
+
                 # Get JSON files in current directory and subdirectories
-                local json_files=$(find . -type f -name "*.json" 2>/dev/null)
+                local json_files
+                json_files=$(find . -type f -name "*.json" 2>/dev/null)
+
                 # Get JSON files in grafana/folders
-                local grafana_files=$(find grafana/folders -type f -name "*.json" 2>/dev/null)
-                COMPREPLY=( $(compgen -W "${folder_uids} ${json_files} ${grafana_files}" -- ${cur}) )
+                local grafana_files
+                grafana_files=$(find grafana/folders -type f -name "*.json" 2>/dev/null)
+
+                mapfile -t COMPREPLY < <(compgen -W "${folder_uids} ${json_files} ${grafana_files}" -- "${cur}")
             else
                 # Complete with all JSON files
-                COMPREPLY=( $(compgen -f -X "!*.json" -- ${cur}) )
+                mapfile -t COMPREPLY < <(compgen -f -X "!*.json" -- "${cur}")
             fi
             return 0
             ;;
@@ -40,32 +46,38 @@ _dashctl_completion() {
             # Complete with both UIDs and file paths
             if [[ -d "grafana/dashboards" ]]; then
                 # Get dashboard UIDs from JSON files
-                local dashboard_uids=$(grep -r "\"uid\":" grafana/dashboards/*/*.json 2>/dev/null | sed -n 's/.*"uid":"\([^"]*\)".*/\1/p')
+                local dashboard_uids
+                dashboard_uids=$(grep -r "\"uid\":" grafana/dashboards/*/*.json 2>/dev/null | sed -n 's/.*"uid":"\([^"]*\)".*/\1/p')
+
                 # Get JSON files in current directory and subdirectories
-                local json_files=$(find . -type f -name "*.json" 2>/dev/null)
+                local json_files
+                json_files=$(find . -type f -name "*.json" 2>/dev/null)
+
                 # Get JSON files in grafana/dashboards
-                local grafana_files=$(find grafana/dashboards -type f -name "*.json" 2>/dev/null)
-                COMPREPLY=( $(compgen -W "${dashboard_uids} ${json_files} ${grafana_files}" -- ${cur}) )
+                local grafana_files
+                grafana_files=$(find grafana/dashboards -type f -name "*.json" 2>/dev/null)
+
+                mapfile -t COMPREPLY < <(compgen -W "${dashboard_uids} ${json_files} ${grafana_files}" -- "${cur}")
             else
                 # Complete with all JSON files
-                COMPREPLY=( $(compgen -f -X "!*.json" -- ${cur}) )
+                mapfile -t COMPREPLY < <(compgen -f -X "!*.json" -- "${cur}")
             fi
             return 0
             ;;
         --work-dir)
             # Complete with directory names
-            COMPREPLY=( $(compgen -d -- ${cur}) )
+            mapfile -t COMPREPLY < <(compgen -d -- "${cur}")
             return 0
             ;;
         export|import|rollback)
             # Complete with options
-            COMPREPLY=( $(compgen -W "${options}" -- ${cur}) )
+            mapfile -t COMPREPLY < <(compgen -W "${options}" -- "${cur}")
             return 0
             ;;
         *)
             # Complete with options if we're not completing a specific option
             if [[ ${cur} == -* ]]; then
-                COMPREPLY=( $(compgen -W "${options}" -- ${cur}) )
+                mapfile -t COMPREPLY < <(compgen -W "${options}" -- "${cur}")
                 return 0
             fi
             ;;
